@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Kasir UMKM (PWA) - Simpel</title>
+  <link rel="manifest" href="manifest.json" />
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;margin:0;padding:0;background:#f6f6f8;color:#111}
+    header{background:#2b7cff;color:#fff;padding:12px 16px}
+    .wrap{padding:12px}
+    .row{display:flex;gap:8px;align-items:center}
+    input,select,button,textarea{padding:8px;border:1px solid #ddd;border-radius:6px;font-size:15px}
+    button{cursor:pointer}
+    .card{background:#fff;border-radius:8px;padding:12px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,0.06)}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:8px;border-bottom:1px solid #eee;text-align:left;font-size:14px}
+    .small{font-size:12px;color:#666}
+    .actions{display:flex;gap:8px;flex-wrap:wrap}
+    .danger{background:#ff4d4d;color:#fff;border:none}
+    .primary{background:#2b7cff;color:#fff;border:none}
+    @media(min-width:700px){.container{max-width:900px;margin:0 auto}}
+  </style>
+</head>
+<body>
+  <header><div style="font-weight:600">Kasir UMKM — Simpel</div></header>
+  <div class="wrap container">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><strong>Tambah Produk</strong><div class="small">Nama, harga (Rp), stok</div></div>
+      </div>
+      <div style="margin-top:8px" class="row">
+        <input id="p_name" placeholder="Nama produk" />
+        <input id="p_price" placeholder="Harga (contoh 12000)" inputmode="numeric" />
+        <input id="p_stock" placeholder="Stok" inputmode="numeric" style="width:80px" />
+        <button id="addProduct" class="primary">Tambah</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <strong>Produk</strong>
+      <div id="productList" style="margin-top:8px"></div>
+    </div>
+
+    <div class="card">
+      <strong>Transaksi / Kasir</strong>
+      <div style="margin-top:8px" class="row">
+        <select id="selectProduct"></select>
+        <input id="qty" inputmode="numeric" placeholder="Jumlah" style="width:80px"/>
+        <button id="addToCart" class="primary">Tambah ke Keranjang</button>
+        <button id="clearCart" class="small">Bersihkan</button>
+      </div>
+      <div id="cartArea" style="margin-top:12px"></div>
+      <div style="margin-top:8px" class="row">
+        <button id="checkout" class="primary">Checkout</button>
+        <button id="exportJson">Export JSON</button>
+        <button id="importJson">Import JSON</button>
+        <input type="file" id="fileInput" style="display:none"/>
+      </div>
+    </div>
+
+    <div class="card">
+      <strong>Riwayat Transaksi</strong>
+      <div id="txList" style="margin-top:8px"></div>
+    </div>
+
+    <div class="card">
+      <strong>Laporan Singkat</strong>
+      <div id="report" style="margin-top:8px"></div>
+    </div>
+
+    <div style="height:40px"></div>
+  </div>
+
+<script>
+const STORE_KEY = 'kasir_umkm_v1';
+let state = { products:[], transactions:[], cart:[] };
+
+function save(){ localStorage.setItem(STORE_KEY, JSON.stringify(state)); renderAll(); }
+function load(){ const v = localStorage.getItem(STORE_KEY); if(v) state = JSON.parse(v); renderAll(); }
+
+function money(n){ return 'Rp ' + Number(n).toLocaleString('id-ID'); }
+
+function renderProducts(){
+  const el = document.getElementById('productList');
+  if(state.products.length===0){ el.innerHTML = '<div class="small">Belum ada produk</div>'; return; }
+  let html = '<table><thead><tr><th>Nama</th><th>Harga</th><th>Stok</th><th></th></tr></thead><tbody>';
+  state.products.forEach((p,idx)=> html += `<tr><td>${p.name}</td><td>${money(p.price)}</td><td>${p.stock}</td><td><button onclick="editProduct(${idx})">Ubah</button> <button onclick="delProduct(${idx})" class="danger">Hapus</button></td></tr>`);
+  html += '</tbody></table>';
+  el.innerHTML = html;
+  const sel = document.getElementById('selectProduct'); sel.innerHTML = '';
+  state.products.forEach((p,idx)=> {
+    const opt = document.createElement('option'); opt.value = idx; opt.text = `${p.name} — ${money(p.price)} (stok ${p.stock})`; sel.appendChild(opt);
+  });
+}
+
+function renderCart(){
+  const c = state.cart; const el = document.getElementById('cartArea');
+  if(c.length===0){ el.innerHTML = '<div class="small">Keranjang kosong</div>'; return; }
+  let html = '<table><thead><tr><th>Produk</th><th>Harga</th><th>Qty</th><th>Subtotal</th><th></th></tr></thead><tbody>';
+  let total=0;
+  c.forEach((it,i)=>{ const sub = it.price*it.qty; total+=sub; html+=`<tr><td>${it.name}</td><td>${money(it.price)}</td><td>${it.qty}</td><td>${money(sub)}</td><td><button onclick="removeCart(${i})">Hapus</button></td></tr>`});
+  html += `</tbody><tfoot><tr><td colspan="3"><strong>Total</strong></td><td colspan="2"><strong>${money(total)}</strong></td></tr></tfoot></table>`;
+  el.innerHTML = html;
+}
+
+function renderTx(){
+  const el = document.getElementById('txList');
+  if(state.transactions.length===0){ el.innerHTML = '<div class="small">Belum ada transaksi</div>'; return; }
+  let html = '<table><thead><tr><th>Tanggal</th><th>Items</th><th>Total</th></tr></thead><tbody>';
+  state.transactions.slice().reverse().forEach(tx=>{
+    html += `<tr><td class="small">${new Date(tx.date).toLocaleString()}</td><td class="small">${tx.items.map(i=>i.name+' x'+i.qty).join(', ')}</td><td>${money(tx.total)}</td></tr>`;
+  });
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}
+
+function renderReport(){
+  const now = new Date().toISOString().slice(0,10);
+  let todayTotal=0, totalIncome=0, soldCount=0;
+  state.transactions.forEach(tx=>{
+    totalIncome += tx.total;
+    if(tx.date.slice(0,10)===now) todayTotal += tx.total;
+    soldCount += tx.items.reduce((s,i)=>s+i.qty,0);
+  });
+  const lowStock = state.products.filter(p=>p.stock<=3).map(p=>`${p.name}(${p.stock})`).join(', ') || '-';
+  document.getElementById('report').innerHTML = `<div class="small">Pendapatan total: <strong>${money(totalIncome)}</strong></div>
+    <div class="small">Pendapatan hari ini: <strong>${money(todayTotal)}</strong></div>
+    <div class="small">Total item terjual: <strong>${soldCount}</strong></div>
+    <div class="small">Produk stok rendah (≤3): <strong>${lowStock}</strong></div>`;
+}
+
+function renderAll(){ renderProducts(); renderCart(); renderTx(); renderReport(); }
+
+document.getElementById('addProduct').addEventListener('click', ()=>{
+  const name = document.getElementById('p_name').value.trim();
+  const price = parseInt(document.getElementById('p_price').value || 0,10);
+  const stock = parseInt(document.getElementById('p_stock').value || 0,10);
+  if(!name || price<=0){ alert('Isi nama & harga valid'); return; }
+  state.products.push({name,price,stock});
+  document.getElementById('p_name').value=''; document.getElementById('p_price').value=''; document.getElementById('p_stock').value='';
+  save();
+});
+
+window.editProduct = function(idx){
+  const p = state.products[idx];
+  const newName = prompt('Nama produk', p.name); if(newName===null) return;
+  const newPrice = prompt('Harga (angka)', p.price); if(newPrice===null) return;
+  const newStock = prompt('Stok', p.stock); if(newStock===null) return;
+  state.products[idx] = { name: newName.trim(), price: parseInt(newPrice||0,10), stock: parseInt(newStock||0,10) };
+  save();
+};
+
+window.delProduct = function(idx){
+  if(!confirm('Hapus produk ini?')) return;
+  state.products.splice(idx,1); save();
+};
+
+document.getElementById('addToCart').addEventListener('click', ()=>{
+  const sel = document.getElementById('selectProduct');
+  if(sel.options.length===0){ alert('Tidak ada produk'); return; }
+  const idx = parseInt(sel.value,10);
+  const qty = Math.max(1, parseInt(document.getElementById('qty').value||1,10));
+  const p = state.products[idx];
+  if(isNaN(qty) || qty<=0){ alert('Jumlah harus angka >0'); return; }
+  if(p.stock < qty){ if(!confirm('Stok kurang — tetap lanjut?')) return; }
+  const exist = state.cart.find(it=>it.id===idx);
+  if(exist){ exist.qty += qty; } else { state.cart.push({ id: idx, name: p.name, price: p.price, qty }); }
+  document.getElementById('qty').value='';
+  save();
+});
+
+window.removeCart = function(i){ state.cart.splice(i,1); save(); }
+document.getElementById('clearCart').addEventListener('click', ()=>{ state.cart=[]; save(); });
+
+document.getElementById('checkout').addEventListener('click', ()=>{
+  if(state.cart.length===0){ alert('Keranjang kosong'); return; }
+  let total = 0;
+  state.cart.forEach(it=> total += it.price * it.qty);
+  if(!confirm(`Total ${money(total)} — konfirmasi checkout?`)) return;
+  state.cart.forEach(it=>{
+    const p = state.products[it.id];
+    if(p) p.stock = Math.max(0, p.stock - it.qty);
+  });
+  const tx = { date: new Date().toISOString(), items: state.cart.map(it=>({name:it.name, qty:it.qty, price:it.price})), total };
+  state.transactions.push(tx);
+  state.cart = [];
+  save();
+  alert('Checkout berhasil — struk tersimpan di riwayat.');
+});
+
+document.getElementById('exportJson').addEventListener('click', ()=>{
+  const data = JSON.stringify(state, null, 2);
+  const blob = new Blob([data], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'kasir_umkm_backup.json'; a.click();
+  URL.revokeObjectURL(url);
+});
+
+document.getElementById('importJson').addEventListener('click', ()=> document.getElementById('fileInput').click());
+document.getElementById('fileInput').addEventListener('change', (e)=> {
+  const f = e.target.files[0]; if(!f) return;
+  const r = new FileReader();
+  r.onload = () => { try{ const d = JSON.parse(r.result); if(confirm('Impor data akan menimpa data saat ini. Lanjutkan?')){ state = d; save(); alert('Impor selesai'); } }catch(err){ alert('File tidak valid'); } };
+  r.readAsText(f);
+});
+
+load();
+
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>
